@@ -1,6 +1,7 @@
 #INSTALL
 ```curl -fsSL https://raw.githubusercontent.com/irultun/adapter/main/install.sh -o install.sh
-bash install.sh --repo irultun/adapter --branch main```
+bash install.sh --repo irultun/adapter --branch main
+```
 
 # Adapter
 
