@@ -11,6 +11,7 @@ API_TOKEN=""
 NODE_MAJOR="20"
 TMP_DIR=""
 SOURCE_DIR=""
+SUMMARY_FILE="/root/${APP_NAME}-install.txt"
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -93,7 +94,7 @@ need_cmd() {
 apt_install_base() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y curl ca-certificates unzip tar xz-utils gnupg lsb-release
+  apt-get install -y curl ca-certificates unzip tar xz-utils gnupg lsb-release openssl
 }
 
 install_nodejs() {
@@ -136,11 +137,13 @@ resolve_source_dir() {
 }
 
 generate_token() {
+  local suffix
   if need_cmd openssl; then
-    openssl rand -hex 24
+    suffix="$(openssl rand -hex 12 | tr '[:lower:]' '[:upper:]')"
   else
-    tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48
+    suffix="$(tr -dc 'A-Z0-9' </dev/urandom | head -c 24)"
   fi
+  printf 'IRULTUN%s\n' "$suffix"
 }
 
 upsert_env() {
@@ -159,19 +162,13 @@ prepare_env() {
   local env_file="${INSTALL_DIR}/.env"
 
   if [ -f "$env_file" ]; then
-    log "File .env sudah ada, mempertahankan nilai yang ada."
+    log "File .env sudah ada, token akan diperbarui untuk install ulang ini."
   else
     cp "${INSTALL_DIR}/.env.example" "$env_file"
   fi
 
   if [ -z "$API_TOKEN" ]; then
-    local current_token
-    current_token="$(grep '^API_TOKEN=' "$env_file" 2>/dev/null | cut -d= -f2- || true)"
-    if [ -n "$current_token" ] && [ "$current_token" != "ganti_dengan_token_server_botvpn" ]; then
-      API_TOKEN="$current_token"
-    else
-      API_TOKEN="$(generate_token)"
-    fi
+    API_TOKEN="$(generate_token)"
   fi
 
   upsert_env "$env_file" "PORT" "$PORT"
@@ -225,25 +222,62 @@ EOF
   systemctl enable --now "$SERVICE_NAME"
 }
 
+get_public_ip() {
+  local ip_addr=""
+  ip_addr="$(curl -4 -fsSL --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+  if [ -z "$ip_addr" ]; then
+    ip_addr="$(curl -4 -fsSL --max-time 10 https://ipv4.icanhazip.com 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+  if [ -z "$ip_addr" ]; then
+    ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  printf '%s\n' "${ip_addr:-127.0.0.1}"
+}
+
+get_domain() {
+  local env_file domain_file domain_value
+  env_file="${INSTALL_DIR}/.env"
+  domain_file="$(grep '^XRAY_DOMAIN_FILE=' "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
+  if [ -z "$domain_file" ]; then
+    domain_file="/etc/xray/domain"
+  fi
+  domain_value="$(tr -d '\r' < "$domain_file" 2>/dev/null | head -n 1 | xargs || true)"
+  if [ -z "$domain_value" ]; then
+    domain_value="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+  fi
+  printf '%s\n' "${domain_value:--}"
+}
+
+save_summary() {
+  local summary="$1"
+  printf '%s\n' "$summary" > "$SUMMARY_FILE"
+}
+
 print_summary() {
-  local ip_addr
-  ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  printf '\n'
-  printf '========================================\n'
-  printf 'Install selesai\n'
-  printf 'Service     : %s\n' "$SERVICE_NAME"
-  printf 'Folder      : %s\n' "$INSTALL_DIR"
-  printf 'Port        : %s\n' "$PORT"
-  printf 'Token       : %s\n' "$API_TOKEN"
-  printf 'Health URL  : http://%s:%s/health\n' "${ip_addr:-127.0.0.1}" "$PORT"
-  printf 'BotVPN auth : %s\n' "$API_TOKEN"
-  printf '========================================\n'
-  printf '\n'
-  printf 'Perintah penting:\n'
-  printf '  systemctl status %s\n' "$SERVICE_NAME"
-  printf '  journalctl -u %s -f\n' "$SERVICE_NAME"
-  printf '  nano %s/.env\n' "$INSTALL_DIR"
-  printf '\n'
+  local ip_addr domain_value health_url summary
+  ip_addr="$(get_public_ip)"
+  domain_value="$(get_domain)"
+  health_url="http://${ip_addr}:${PORT}/health"
+
+  summary="========================================
+Install selesai
+Service     : ${SERVICE_NAME}
+Folder      : ${INSTALL_DIR}
+Port        : ${PORT}
+API TOKEN   : ${API_TOKEN}
+IP VPS      : ${ip_addr}
+Domain      : ${domain_value}
+Health URL  : ${health_url}
+Summary file: ${SUMMARY_FILE}
+========================================
+
+Perintah penting:
+  systemctl status ${SERVICE_NAME}
+  journalctl -u ${SERVICE_NAME} -f
+  nano ${INSTALL_DIR}/.env"
+
+  save_summary "$summary"
+  printf '\n%b\n\n' "$summary"
 }
 
 main() {
