@@ -1,6 +1,11 @@
-#INSTALL
-```curl -fsSL https://raw.githubusercontent.com/irultun/adapter/main/install.sh -o install.sh
-bash install.sh --repo irultun/adapter --branch main
+# INSTALL
+```sysctl -w net.ipv6.conf.all.disable_ipv6=1 && \
+sysctl -w net.ipv6.conf.default.disable_ipv6=1 && \
+apt update -y && \
+apt install -y git curl && \
+curl -L -k -sS https://raw.githubusercontent.com/irulgood/adapter/main/install.sh -o install.sh && \
+bash install.sh --repo irulgood/adapter --branch main && \
+[ $? -eq 0 ] && rm -f install.sh
 ```
 
 # Adapter
