@@ -12,6 +12,7 @@ NODE_MAJOR="20"
 TMP_DIR=""
 SOURCE_DIR=""
 SUMMARY_FILE="/root/${APP_NAME}-install.txt"
+TEMPLATE_ENV_SOURCE=""
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -116,9 +117,27 @@ install_nodejs() {
   apt-get install -y nodejs
 }
 
+find_template_env() {
+  local base_dir="$1"
+
+  if [ -f "${base_dir}/.env.example" ]; then
+    TEMPLATE_ENV_SOURCE="${base_dir}/.env.example"
+    return 0
+  fi
+
+  if [ -f "${base_dir}/.env" ]; then
+    TEMPLATE_ENV_SOURCE="${base_dir}/.env"
+    return 0
+  fi
+
+  TEMPLATE_ENV_SOURCE=""
+  return 1
+}
+
 resolve_source_dir() {
-  if [ -f "./app.js" ] && [ -f "./package.json" ] && [ -f "./.env.example" ]; then
+  if [ -f "./app.js" ] && [ -f "./package.json" ]; then
     SOURCE_DIR="$(pwd)"
+    find_template_env "$SOURCE_DIR" || true
     log "Pakai source lokal dari ${SOURCE_DIR}"
     return
   fi
@@ -128,12 +147,27 @@ resolve_source_dir() {
   TMP_DIR="$(mktemp -d)"
   local zip_url="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.zip"
   local zip_file="${TMP_DIR}/repo.zip"
+  local extracted_root=""
   log "Mengunduh source dari ${zip_url}"
   curl -fsSL "$zip_url" -o "$zip_file"
   unzip -q "$zip_file" -d "$TMP_DIR"
-  SOURCE_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-  [ -n "$SOURCE_DIR" ] || fail "Gagal menemukan source adapter setelah download."
-  [ -f "${SOURCE_DIR}/app.js" ] || fail "File app.js tidak ditemukan di source repo."
+
+  extracted_root="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [ -n "$extracted_root" ] || fail "Gagal menemukan source adapter setelah download."
+
+  if [ -f "${extracted_root}/app.js" ] && [ -f "${extracted_root}/package.json" ]; then
+    SOURCE_DIR="$extracted_root"
+    find_template_env "$SOURCE_DIR" || true
+    return
+  fi
+
+  if [ -f "${extracted_root}/adapter/app.js" ] && [ -f "${extracted_root}/adapter/package.json" ]; then
+    SOURCE_DIR="${extracted_root}/adapter"
+    find_template_env "$SOURCE_DIR" || true
+    return
+  fi
+
+  fail "File app.js/package.json tidak ditemukan di root repo maupun subfolder adapter/."
 }
 
 generate_token() {
@@ -163,8 +197,12 @@ prepare_env() {
 
   if [ -f "$env_file" ]; then
     log "File .env sudah ada, token akan diperbarui untuk install ulang ini."
+  elif [ -n "$TEMPLATE_ENV_SOURCE" ] && [ -f "$TEMPLATE_ENV_SOURCE" ]; then
+    cp "$TEMPLATE_ENV_SOURCE" "$env_file"
+    log "Membuat .env dari template $(basename "$TEMPLATE_ENV_SOURCE")"
   else
-    cp "${INSTALL_DIR}/.env.example" "$env_file"
+    touch "$env_file"
+    warn "Template .env tidak ditemukan. Membuat file .env kosong."
   fi
 
   if [ -z "$API_TOKEN" ]; then
